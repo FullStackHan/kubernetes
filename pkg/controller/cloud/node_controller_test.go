@@ -30,7 +30,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/record"
 	cloudprovider "k8s.io/cloud-provider"
-	fakecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/fake"
+	fakecloud "k8s.io/cloud-provider/fake"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/controller/testutil"
 	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
@@ -135,7 +135,7 @@ func TestEnsureNodeExistsByProviderID(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.testName, func(t *testing.T) {
-			fc := &fakecloud.FakeCloud{
+			fc := &fakecloud.Cloud{
 				ExistsByProviderID: tc.existsByProviderID,
 				Err:                tc.nodeNameErr,
 				ErrByProviderID:    tc.providerIDErr,
@@ -199,7 +199,7 @@ func TestNodeInitialized(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{
 			types.NodeName("node0"): "t1.micro",
 		},
@@ -264,7 +264,7 @@ func TestNodeIgnored(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{
 			types.NodeName("node0"): "t1.micro",
 		},
@@ -336,7 +336,7 @@ func TestGCECondition(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{
 			types.NodeName("node0"): "t1.micro",
 		},
@@ -421,7 +421,7 @@ func TestZoneInitialized(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{
 			types.NodeName("node0"): "t1.micro",
 		},
@@ -462,9 +462,9 @@ func TestZoneInitialized(t *testing.T) {
 	assert.Equal(t, "node0", fnh.UpdatedNodes[0].Name, "Node was not updated")
 	assert.Equal(t, 2, len(fnh.UpdatedNodes[0].ObjectMeta.Labels),
 		"Node label for Region and Zone were not set")
-	assert.Equal(t, "us-west", fnh.UpdatedNodes[0].ObjectMeta.Labels[kubeletapis.LabelZoneRegion],
+	assert.Equal(t, "us-west", fnh.UpdatedNodes[0].ObjectMeta.Labels[v1.LabelZoneRegion],
 		"Node Region not correctly updated")
-	assert.Equal(t, "us-west-1a", fnh.UpdatedNodes[0].ObjectMeta.Labels[kubeletapis.LabelZoneFailureDomain],
+	assert.Equal(t, "us-west-1a", fnh.UpdatedNodes[0].ObjectMeta.Labels[v1.LabelZoneFailureDomain],
 		"Node FailureDomain not correctly updated")
 }
 
@@ -511,7 +511,7 @@ func TestNodeAddresses(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{},
 		Addresses: []v1.NodeAddress{
 			{
@@ -624,7 +624,7 @@ func TestNodeProvidedIPAddresses(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{
 			types.NodeName("node0"):           "t1.micro",
 			types.NodeName("node0.aws.12345"): "t2.macro",
@@ -839,7 +839,7 @@ func TestNodeAddressesNotUpdate(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{},
 		Addresses: []v1.NodeAddress{
 			{
@@ -914,7 +914,7 @@ func TestNodeProviderID(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{},
 		Addresses: []v1.NodeAddress{
 			{
@@ -997,7 +997,7 @@ func TestNodeProviderIDAlreadySet(t *testing.T) {
 
 	factory := informers.NewSharedInformerFactory(fnh, controller.NoResyncPeriodFunc())
 
-	fakeCloud := &fakecloud.FakeCloud{
+	fakeCloud := &fakecloud.Cloud{
 		InstanceTypes: map[types.NodeName]string{},
 		Addresses: []v1.NodeAddress{
 			{

@@ -22,10 +22,11 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	appsv1beta1 "k8s.io/api/apps/v1beta1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,20 +50,22 @@ func TestRun(t *testing.T) {
 	// test whether the server is really healthy after /healthz told us so
 	t.Logf("Creating Deployment directly after being healthy")
 	var replicas int32 = 1
-	_, err = client.AppsV1beta1().Deployments("default").Create(&appsv1beta1.Deployment{
+	_, err = client.AppsV1().Deployments("default").Create(&appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Deployment",
-			APIVersion: "apps/v1beta1",
+			APIVersion: "apps/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "default",
 			Name:      "test",
+			Labels:    map[string]string{"foo": "bar"},
 		},
-		Spec: appsv1beta1.DeploymentSpec{
+		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
-			Strategy: appsv1beta1.DeploymentStrategy{
-				Type: appsv1beta1.RollingUpdateDeploymentStrategyType,
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
 			},
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{"foo": "bar"},
@@ -80,6 +83,48 @@ func TestRun(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Failed to create deployment: %v", err)
+	}
+}
+
+func endpointReturnsStatusOK(client *kubernetes.Clientset, path string) bool {
+	res := client.CoreV1().RESTClient().Get().AbsPath(path).Do()
+	var status int
+	res.StatusCode(&status)
+	return status == http.StatusOK
+}
+
+func TestStartupSequenceHealthzAndReadyz(t *testing.T) {
+	hc := &delayedCheck{}
+	instanceOptions := &kubeapiservertesting.TestServerInstanceOptions{
+		InjectedHealthzChecker: hc,
+	}
+	server := kubeapiservertesting.StartTestServerOrDie(t, instanceOptions, []string{"--maximum-startup-sequence-duration", "5s"}, framework.SharedEtcd())
+	defer server.TearDownFn()
+
+	client, err := kubernetes.NewForConfig(server.ClientConfig)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if endpointReturnsStatusOK(client, "/readyz") {
+		t.Fatalf("readyz should start unready")
+	}
+	// we need to wait longer than our grace period
+	err = wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		return !endpointReturnsStatusOK(client, "/healthz"), nil
+	})
+	if err != nil {
+		t.Fatalf("healthz should have become unhealthy: %v", err)
+	}
+	hc.makeHealthy()
+	err = wait.Poll(100*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		return endpointReturnsStatusOK(client, "/healthz"), nil
+	})
+	if err != nil {
+		t.Fatalf("healthz should have become healthy again: %v", err)
+	}
+	if !endpointReturnsStatusOK(client, "/readyz") {
+		t.Fatalf("readyz should be healthy")
 	}
 }
 
@@ -250,4 +295,28 @@ func TestReconcilerMasterLeaseMultiMoreMasters(t *testing.T) {
 
 func TestReconcilerMasterLeaseMultiCombined(t *testing.T) {
 	testReconcilersMasterLease(t, 3, 3)
+}
+
+type delayedCheck struct {
+	healthLock sync.Mutex
+	isHealthy  bool
+}
+
+func (h *delayedCheck) Name() string {
+	return "delayed-check"
+}
+
+func (h *delayedCheck) Check(req *http.Request) error {
+	h.healthLock.Lock()
+	defer h.healthLock.Unlock()
+	if h.isHealthy {
+		return nil
+	}
+	return fmt.Errorf("isn't healthy")
+}
+
+func (h *delayedCheck) makeHealthy() {
+	h.healthLock.Lock()
+	defer h.healthLock.Unlock()
+	h.isHealthy = true
 }

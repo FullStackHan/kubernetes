@@ -23,14 +23,14 @@ import (
 	"sort"
 	"testing"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission"
+	admissiontesting "k8s.io/apiserver/pkg/admission/testing"
 	cloudprovider "k8s.io/cloud-provider"
 	api "k8s.io/kubernetes/pkg/apis/core"
-	kubeletapis "k8s.io/kubernetes/pkg/kubelet/apis"
 )
 
 type mockVolumes struct {
@@ -65,9 +65,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "non-cloud PV ignored",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "noncloud", Namespace: "myns"},
@@ -173,9 +173,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "AWS EBS PV labeled correctly",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "awsebs", Namespace: "myns"},
@@ -192,9 +192,9 @@ func Test_PVLAdmission(t *testing.T) {
 					Name:      "awsebs",
 					Namespace: "myns",
 					Labels: map[string]string{
-						"a":                                "1",
-						"b":                                "2",
-						kubeletapis.LabelZoneFailureDomain: "1__2__3",
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
 					},
 				},
 				Spec: api.PersistentVolumeSpec{
@@ -219,7 +219,7 @@ func Test_PVLAdmission(t *testing.T) {
 											Values:   []string{"2"},
 										},
 										{
-											Key:      kubeletapis.LabelZoneFailureDomain,
+											Key:      v1.LabelZoneFailureDomain,
 											Operator: api.NodeSelectorOpIn,
 											Values:   []string{"1", "2", "3"},
 										},
@@ -236,9 +236,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "GCE PD PV labeled correctly",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "gcepd", Namespace: "myns"},
@@ -255,9 +255,9 @@ func Test_PVLAdmission(t *testing.T) {
 					Name:      "gcepd",
 					Namespace: "myns",
 					Labels: map[string]string{
-						"a":                                "1",
-						"b":                                "2",
-						kubeletapis.LabelZoneFailureDomain: "1__2__3",
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
 					},
 				},
 				Spec: api.PersistentVolumeSpec{
@@ -282,7 +282,7 @@ func Test_PVLAdmission(t *testing.T) {
 											Values:   []string{"2"},
 										},
 										{
-											Key:      kubeletapis.LabelZoneFailureDomain,
+											Key:      v1.LabelZoneFailureDomain,
 											Operator: api.NodeSelectorOpIn,
 											Values:   []string{"1", "2", "3"},
 										},
@@ -299,9 +299,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "Azure Disk PV labeled correctly",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -321,9 +321,9 @@ func Test_PVLAdmission(t *testing.T) {
 					Name:      "azurepd",
 					Namespace: "myns",
 					Labels: map[string]string{
-						"a":                                "1",
-						"b":                                "2",
-						kubeletapis.LabelZoneFailureDomain: "1__2__3",
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
 					},
 				},
 				Spec: api.PersistentVolumeSpec{
@@ -348,7 +348,7 @@ func Test_PVLAdmission(t *testing.T) {
 											Values:   []string{"2"},
 										},
 										{
-											Key:      kubeletapis.LabelZoneFailureDomain,
+											Key:      v1.LabelZoneFailureDomain,
 											Operator: api.NodeSelectorOpIn,
 											Values:   []string{"1", "2", "3"},
 										},
@@ -365,9 +365,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "Cinder Disk PV labeled correctly",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -387,9 +387,9 @@ func Test_PVLAdmission(t *testing.T) {
 					Name:      "azurepd",
 					Namespace: "myns",
 					Labels: map[string]string{
-						"a":                                "1",
-						"b":                                "2",
-						kubeletapis.LabelZoneFailureDomain: "1__2__3",
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
 					},
 				},
 				Spec: api.PersistentVolumeSpec{
@@ -414,7 +414,7 @@ func Test_PVLAdmission(t *testing.T) {
 											Values:   []string{"2"},
 										},
 										{
-											Key:      kubeletapis.LabelZoneFailureDomain,
+											Key:      v1.LabelZoneFailureDomain,
 											Operator: api.NodeSelectorOpIn,
 											Values:   []string{"1", "2", "3"},
 										},
@@ -431,9 +431,9 @@ func Test_PVLAdmission(t *testing.T) {
 			name:    "AWS EBS PV overrides user applied labels",
 			handler: newPersistentVolumeLabel(),
 			pvlabeler: mockVolumeLabels(map[string]string{
-				"a":                                "1",
-				"b":                                "2",
-				kubeletapis.LabelZoneFailureDomain: "1__2__3",
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
 			}),
 			preAdmissionPV: &api.PersistentVolume{
 				ObjectMeta: metav1.ObjectMeta{
@@ -456,9 +456,9 @@ func Test_PVLAdmission(t *testing.T) {
 					Name:      "awsebs",
 					Namespace: "myns",
 					Labels: map[string]string{
-						"a":                                "1",
-						"b":                                "2",
-						kubeletapis.LabelZoneFailureDomain: "1__2__3",
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
 					},
 				},
 				Spec: api.PersistentVolumeSpec{
@@ -483,7 +483,7 @@ func Test_PVLAdmission(t *testing.T) {
 											Values:   []string{"2"},
 										},
 										{
-											Key:      kubeletapis.LabelZoneFailureDomain,
+											Key:      v1.LabelZoneFailureDomain,
 											Operator: api.NodeSelectorOpIn,
 											Values:   []string{"1", "2", "3"},
 										},
@@ -684,14 +684,80 @@ func Test_PVLAdmission(t *testing.T) {
 			},
 			err: nil,
 		},
+		{
+			name:    "vSphere PV labeled correctly",
+			handler: newPersistentVolumeLabel(),
+			pvlabeler: mockVolumeLabels(map[string]string{
+				"a":                       "1",
+				"b":                       "2",
+				v1.LabelZoneFailureDomain: "1__2__3",
+			}),
+			preAdmissionPV: &api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vSpherePV",
+					Namespace: "myns",
+				},
+				Spec: api.PersistentVolumeSpec{
+					PersistentVolumeSource: api.PersistentVolumeSource{
+						VsphereVolume: &api.VsphereVirtualDiskVolumeSource{
+							VolumePath: "123",
+						},
+					},
+				},
+			},
+			postAdmissionPV: &api.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vSpherePV",
+					Namespace: "myns",
+					Labels: map[string]string{
+						"a":                       "1",
+						"b":                       "2",
+						v1.LabelZoneFailureDomain: "1__2__3",
+					},
+				},
+				Spec: api.PersistentVolumeSpec{
+					PersistentVolumeSource: api.PersistentVolumeSource{
+						VsphereVolume: &api.VsphereVirtualDiskVolumeSource{
+							VolumePath: "123",
+						},
+					},
+					NodeAffinity: &api.VolumeNodeAffinity{
+						Required: &api.NodeSelector{
+							NodeSelectorTerms: []api.NodeSelectorTerm{
+								{
+									MatchExpressions: []api.NodeSelectorRequirement{
+										{
+											Key:      "a",
+											Operator: api.NodeSelectorOpIn,
+											Values:   []string{"1"},
+										},
+										{
+											Key:      "b",
+											Operator: api.NodeSelectorOpIn,
+											Values:   []string{"2"},
+										},
+										{
+											Key:      v1.LabelZoneFailureDomain,
+											Operator: api.NodeSelectorOpIn,
+											Values:   []string{"1", "2", "3"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			err: nil,
+		},
 	}
 
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
 			setPVLabeler(testcase.handler, testcase.pvlabeler)
-			handler := admission.NewChainHandler(testcase.handler)
+			handler := admissiontesting.WithReinvocationTesting(t, admission.NewChainHandler(testcase.handler))
 
-			err := handler.Admit(admission.NewAttributesRecord(testcase.preAdmissionPV, nil, api.Kind("PersistentVolume").WithVersion("version"), testcase.preAdmissionPV.Namespace, testcase.preAdmissionPV.Name, api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, false, nil))
+			err := handler.Admit(admission.NewAttributesRecord(testcase.preAdmissionPV, nil, api.Kind("PersistentVolume").WithVersion("version"), testcase.preAdmissionPV.Namespace, testcase.preAdmissionPV.Name, api.Resource("persistentvolumes").WithVersion("version"), "", admission.Create, &metav1.CreateOptions{}, false, nil), nil)
 			if !reflect.DeepEqual(err, testcase.err) {
 				t.Logf("expected error: %q", testcase.err)
 				t.Logf("actual error: %q", err)
@@ -719,6 +785,7 @@ func setPVLabeler(handler *persistentVolumeLabel, pvlabeler cloudprovider.PVLabe
 	handler.gcePVLabeler = pvlabeler
 	handler.azurePVLabeler = pvlabeler
 	handler.openStackPVLabeler = pvlabeler
+	handler.vspherePVLabeler = pvlabeler
 }
 
 // sortMatchExpressions sorts a PV's node selector match expressions by key name if it is not nil

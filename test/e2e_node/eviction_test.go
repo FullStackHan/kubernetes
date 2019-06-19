@@ -24,12 +24,11 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
-	schedulerapi "k8s.io/api/scheduling/v1beta1"
+	schedulerapi "k8s.io/api/scheduling/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	nodeutil "k8s.io/kubernetes/pkg/api/v1/node"
 	kubeletconfig "k8s.io/kubernetes/pkg/kubelet/apis/config"
 	stats "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/eviction"
@@ -37,6 +36,8 @@ import (
 	kubeletmetrics "k8s.io/kubernetes/pkg/kubelet/metrics"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2elog "k8s.io/kubernetes/test/e2e/framework/log"
+	testutils "k8s.io/kubernetes/test/utils"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	. "github.com/onsi/ginkgo"
@@ -50,7 +51,6 @@ const (
 	postTestConditionMonitoringPeriod = 1 * time.Minute
 	evictionPollInterval              = 2 * time.Second
 	pressureDissapearTimeout          = 1 * time.Minute
-	longPodDeletionTimeout            = 10 * time.Minute
 	// pressure conditions often surface after evictions because the kubelet only updates
 	// node conditions periodically.
 	// we wait this period after evictions to make sure that we wait out this delay
@@ -171,7 +171,7 @@ var _ = framework.KubeDescribe("LocalStorageEviction [Slow] [Serial] [Disruptive
 	expectedStarvedResource := v1.ResourceEphemeralStorage
 	Context(fmt.Sprintf(testContextFmt, expectedNodeCondition), func() {
 		tempSetCurrentKubeletConfig(f, func(initialConfig *kubeletconfig.KubeletConfiguration) {
-			diskConsumed := resource.MustParse("100Mi")
+			diskConsumed := resource.MustParse("200Mi")
 			summary := eventuallyGetSummary()
 			availableBytes := *(summary.Node.Fs.AvailableBytes)
 			initialConfig.EvictionHard = map[string]string{string(evictionapi.SignalNodeFsAvailable): fmt.Sprintf("%d", availableBytes-uint64(diskConsumed.Value()))}
@@ -200,7 +200,7 @@ var _ = framework.KubeDescribe("LocalStorageSoftEviction [Slow] [Serial] [Disrup
 	expectedStarvedResource := v1.ResourceEphemeralStorage
 	Context(fmt.Sprintf(testContextFmt, expectedNodeCondition), func() {
 		tempSetCurrentKubeletConfig(f, func(initialConfig *kubeletconfig.KubeletConfiguration) {
-			diskConsumed := resource.MustParse("100Mi")
+			diskConsumed := resource.MustParse("200Mi")
 			summary := eventuallyGetSummary()
 			availableBytes := *(summary.Node.Fs.AvailableBytes)
 			if availableBytes <= uint64(diskConsumed.Value()) {
@@ -302,11 +302,11 @@ var _ = framework.KubeDescribe("PriorityMemoryEvictionOrdering [Slow] [Serial] [
 			initialConfig.EvictionMinimumReclaim = map[string]string{}
 		})
 		BeforeEach(func() {
-			_, err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
+			_, err := f.ClientSet.SchedulingV1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
 			Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 		})
 		AfterEach(func() {
-			err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
+			err := f.ClientSet.SchedulingV1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		})
 		specs := []podEvictSpec{
@@ -359,11 +359,11 @@ var _ = framework.KubeDescribe("PriorityLocalStorageEvictionOrdering [Slow] [Ser
 			initialConfig.EvictionMinimumReclaim = map[string]string{}
 		})
 		BeforeEach(func() {
-			_, err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
+			_, err := f.ClientSet.SchedulingV1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
 			Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 		})
 		AfterEach(func() {
-			err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
+			err := f.ClientSet.SchedulingV1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		})
 		specs := []podEvictSpec{
@@ -412,11 +412,11 @@ var _ = framework.KubeDescribe("PriorityPidEvictionOrdering [Slow] [Serial] [Dis
 			initialConfig.EvictionMinimumReclaim = map[string]string{}
 		})
 		BeforeEach(func() {
-			_, err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
+			_, err := f.ClientSet.SchedulingV1().PriorityClasses().Create(&schedulerapi.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: highPriorityClassName}, Value: highPriority})
 			Expect(err == nil || errors.IsAlreadyExists(err)).To(BeTrue())
 		})
 		AfterEach(func() {
-			err := f.ClientSet.SchedulingV1beta1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
+			err := f.ClientSet.SchedulingV1().PriorityClasses().Delete(highPriorityClassName, &metav1.DeleteOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		})
 		specs := []podEvictSpec{
@@ -459,10 +459,11 @@ func runEvictionTest(f *framework.Framework, pressureTimeout time.Duration, expe
 			// Sleep so that pods requesting local storage do not fail to schedule
 			time.Sleep(30 * time.Second)
 			By("seting up pods to be used by tests")
+			pods := []*v1.Pod{}
 			for _, spec := range testSpecs {
-				By(fmt.Sprintf("creating pod with container: %s", spec.pod.Name))
-				f.PodClient().CreateSync(spec.pod)
+				pods = append(pods, spec.pod)
 			}
+			f.PodClient().CreateBatch(pods)
 		})
 
 		It("should eventually evict all of the correct pods", func() {
@@ -479,9 +480,9 @@ func runEvictionTest(f *framework.Framework, pressureTimeout time.Duration, expe
 			Eventually(func() error {
 				if expectedNodeCondition != noPressure {
 					if hasNodeCondition(f, expectedNodeCondition) {
-						framework.Logf("Node has %s", expectedNodeCondition)
+						e2elog.Logf("Node has %s", expectedNodeCondition)
 					} else {
-						framework.Logf("Node does NOT have %s", expectedNodeCondition)
+						e2elog.Logf("Node does NOT have %s", expectedNodeCondition)
 					}
 				}
 				logKubeletLatencyMetrics(kubeletmetrics.EvictionStatsAgeKey)
@@ -568,7 +569,7 @@ func verifyEvictionOrdering(f *framework.Framework, testSpecs []podEvictSpec) er
 	}
 	updatedPods := updatedPodList.Items
 	for _, p := range updatedPods {
-		framework.Logf("fetching pod %s; phase= %v", p.Name, p.Status.Phase)
+		e2elog.Logf("fetching pod %s; phase= %v", p.Name, p.Status.Phase)
 	}
 
 	By("checking eviction ordering and ensuring important pods dont fail")
@@ -681,7 +682,7 @@ func verifyEvictionEvents(f *framework.Framework, testSpecs []podEvictSpec, expe
 // Returns TRUE if the node has the node condition, FALSE otherwise
 func hasNodeCondition(f *framework.Framework, expectedNodeCondition v1.NodeConditionType) bool {
 	localNodeStatus := getLocalNode(f).Status
-	_, actualNodeCondition := nodeutil.GetNodeCondition(&localNodeStatus, expectedNodeCondition)
+	_, actualNodeCondition := testutils.GetNodeCondition(&localNodeStatus, expectedNodeCondition)
 	Expect(actualNodeCondition).NotTo(BeNil())
 	return actualNodeCondition.Status == v1.ConditionTrue
 }
@@ -689,25 +690,25 @@ func hasNodeCondition(f *framework.Framework, expectedNodeCondition v1.NodeCondi
 func logInodeMetrics() {
 	summary, err := getNodeSummary()
 	if err != nil {
-		framework.Logf("Error getting summary: %v", err)
+		e2elog.Logf("Error getting summary: %v", err)
 		return
 	}
 	if summary.Node.Runtime != nil && summary.Node.Runtime.ImageFs != nil && summary.Node.Runtime.ImageFs.Inodes != nil && summary.Node.Runtime.ImageFs.InodesFree != nil {
-		framework.Logf("imageFsInfo.Inodes: %d, imageFsInfo.InodesFree: %d", *summary.Node.Runtime.ImageFs.Inodes, *summary.Node.Runtime.ImageFs.InodesFree)
+		e2elog.Logf("imageFsInfo.Inodes: %d, imageFsInfo.InodesFree: %d", *summary.Node.Runtime.ImageFs.Inodes, *summary.Node.Runtime.ImageFs.InodesFree)
 	}
 	if summary.Node.Fs != nil && summary.Node.Fs.Inodes != nil && summary.Node.Fs.InodesFree != nil {
-		framework.Logf("rootFsInfo.Inodes: %d, rootFsInfo.InodesFree: %d", *summary.Node.Fs.Inodes, *summary.Node.Fs.InodesFree)
+		e2elog.Logf("rootFsInfo.Inodes: %d, rootFsInfo.InodesFree: %d", *summary.Node.Fs.Inodes, *summary.Node.Fs.InodesFree)
 	}
 	for _, pod := range summary.Pods {
-		framework.Logf("Pod: %s", pod.PodRef.Name)
+		e2elog.Logf("Pod: %s", pod.PodRef.Name)
 		for _, container := range pod.Containers {
 			if container.Rootfs != nil && container.Rootfs.InodesUsed != nil {
-				framework.Logf("--- summary Container: %s inodeUsage: %d", container.Name, *container.Rootfs.InodesUsed)
+				e2elog.Logf("--- summary Container: %s inodeUsage: %d", container.Name, *container.Rootfs.InodesUsed)
 			}
 		}
 		for _, volume := range pod.VolumeStats {
 			if volume.FsStats.InodesUsed != nil {
-				framework.Logf("--- summary Volume: %s inodeUsage: %d", volume.Name, *volume.FsStats.InodesUsed)
+				e2elog.Logf("--- summary Volume: %s inodeUsage: %d", volume.Name, *volume.FsStats.InodesUsed)
 			}
 		}
 	}
@@ -716,25 +717,25 @@ func logInodeMetrics() {
 func logDiskMetrics() {
 	summary, err := getNodeSummary()
 	if err != nil {
-		framework.Logf("Error getting summary: %v", err)
+		e2elog.Logf("Error getting summary: %v", err)
 		return
 	}
 	if summary.Node.Runtime != nil && summary.Node.Runtime.ImageFs != nil && summary.Node.Runtime.ImageFs.CapacityBytes != nil && summary.Node.Runtime.ImageFs.AvailableBytes != nil {
-		framework.Logf("imageFsInfo.CapacityBytes: %d, imageFsInfo.AvailableBytes: %d", *summary.Node.Runtime.ImageFs.CapacityBytes, *summary.Node.Runtime.ImageFs.AvailableBytes)
+		e2elog.Logf("imageFsInfo.CapacityBytes: %d, imageFsInfo.AvailableBytes: %d", *summary.Node.Runtime.ImageFs.CapacityBytes, *summary.Node.Runtime.ImageFs.AvailableBytes)
 	}
 	if summary.Node.Fs != nil && summary.Node.Fs.CapacityBytes != nil && summary.Node.Fs.AvailableBytes != nil {
-		framework.Logf("rootFsInfo.CapacityBytes: %d, rootFsInfo.AvailableBytes: %d", *summary.Node.Fs.CapacityBytes, *summary.Node.Fs.AvailableBytes)
+		e2elog.Logf("rootFsInfo.CapacityBytes: %d, rootFsInfo.AvailableBytes: %d", *summary.Node.Fs.CapacityBytes, *summary.Node.Fs.AvailableBytes)
 	}
 	for _, pod := range summary.Pods {
-		framework.Logf("Pod: %s", pod.PodRef.Name)
+		e2elog.Logf("Pod: %s", pod.PodRef.Name)
 		for _, container := range pod.Containers {
 			if container.Rootfs != nil && container.Rootfs.UsedBytes != nil {
-				framework.Logf("--- summary Container: %s UsedBytes: %d", container.Name, *container.Rootfs.UsedBytes)
+				e2elog.Logf("--- summary Container: %s UsedBytes: %d", container.Name, *container.Rootfs.UsedBytes)
 			}
 		}
 		for _, volume := range pod.VolumeStats {
 			if volume.FsStats.InodesUsed != nil {
-				framework.Logf("--- summary Volume: %s UsedBytes: %d", volume.Name, *volume.FsStats.UsedBytes)
+				e2elog.Logf("--- summary Volume: %s UsedBytes: %d", volume.Name, *volume.FsStats.UsedBytes)
 			}
 		}
 	}
@@ -743,22 +744,22 @@ func logDiskMetrics() {
 func logMemoryMetrics() {
 	summary, err := getNodeSummary()
 	if err != nil {
-		framework.Logf("Error getting summary: %v", err)
+		e2elog.Logf("Error getting summary: %v", err)
 		return
 	}
 	if summary.Node.Memory != nil && summary.Node.Memory.WorkingSetBytes != nil && summary.Node.Memory.AvailableBytes != nil {
-		framework.Logf("Node.Memory.WorkingSetBytes: %d, Node.Memory.AvailableBytes: %d", *summary.Node.Memory.WorkingSetBytes, *summary.Node.Memory.AvailableBytes)
+		e2elog.Logf("Node.Memory.WorkingSetBytes: %d, Node.Memory.AvailableBytes: %d", *summary.Node.Memory.WorkingSetBytes, *summary.Node.Memory.AvailableBytes)
 	}
 	for _, sysContainer := range summary.Node.SystemContainers {
 		if sysContainer.Name == stats.SystemContainerPods && sysContainer.Memory != nil && sysContainer.Memory.WorkingSetBytes != nil && sysContainer.Memory.AvailableBytes != nil {
-			framework.Logf("Allocatable.Memory.WorkingSetBytes: %d, Allocatable.Memory.AvailableBytes: %d", *sysContainer.Memory.WorkingSetBytes, *sysContainer.Memory.AvailableBytes)
+			e2elog.Logf("Allocatable.Memory.WorkingSetBytes: %d, Allocatable.Memory.AvailableBytes: %d", *sysContainer.Memory.WorkingSetBytes, *sysContainer.Memory.AvailableBytes)
 		}
 	}
 	for _, pod := range summary.Pods {
-		framework.Logf("Pod: %s", pod.PodRef.Name)
+		e2elog.Logf("Pod: %s", pod.PodRef.Name)
 		for _, container := range pod.Containers {
 			if container.Memory != nil && container.Memory.WorkingSetBytes != nil {
-				framework.Logf("--- summary Container: %s WorkingSetBytes: %d", container.Name, *container.Memory.WorkingSetBytes)
+				e2elog.Logf("--- summary Container: %s WorkingSetBytes: %d", container.Name, *container.Memory.WorkingSetBytes)
 			}
 		}
 	}
@@ -767,11 +768,11 @@ func logMemoryMetrics() {
 func logPidMetrics() {
 	summary, err := getNodeSummary()
 	if err != nil {
-		framework.Logf("Error getting summary: %v", err)
+		e2elog.Logf("Error getting summary: %v", err)
 		return
 	}
 	if summary.Node.Rlimit != nil && summary.Node.Rlimit.MaxPID != nil && summary.Node.Rlimit.NumOfRunningProcesses != nil {
-		framework.Logf("Node.Rlimit.MaxPID: %d, Node.Rlimit.RunningProcesses: %d", *summary.Node.Rlimit.MaxPID, *summary.Node.Rlimit.NumOfRunningProcesses)
+		e2elog.Logf("Node.Rlimit.MaxPID: %d, Node.Rlimit.RunningProcesses: %d", *summary.Node.Rlimit.MaxPID, *summary.Node.Rlimit.NumOfRunningProcesses)
 	}
 }
 
@@ -831,7 +832,7 @@ func diskConsumingPod(name string, diskConsumedMB int, volumeSource *v1.VolumeSo
 		path = volumeMountPath
 	}
 	// Each iteration writes 1 Mb, so do diskConsumedMB iterations.
-	return podWithCommand(volumeSource, resources, diskConsumedMB, name, fmt.Sprintf("dd if=/dev/urandom of=%s${i} bs=1048576 count=1 2>/dev/null;", filepath.Join(path, "file")))
+	return podWithCommand(volumeSource, resources, diskConsumedMB, name, fmt.Sprintf("dd if=/dev/urandom of=%s${i} bs=1048576 count=1 2>/dev/null; sleep .1;", filepath.Join(path, "file")))
 }
 
 func pidConsumingPod(name string, numProcesses int) *v1.Pod {

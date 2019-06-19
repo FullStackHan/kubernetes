@@ -66,7 +66,7 @@ func TestFinalizeNamespaceFunc(t *testing.T) {
 		},
 	}
 	d := namespacedResourcesDeleter{
-		nsClient:       mockClient.Core().Namespaces(),
+		nsClient:       mockClient.CoreV1().Namespaces(),
 		finalizerToken: v1.FinalizerKubernetes,
 	}
 	d.finalizeNamespace(testNamespace)
@@ -180,7 +180,7 @@ func testSyncNamespaceThatIsTerminating(t *testing.T, versions *metav1.APIVersio
 		fn := func() ([]*metav1.APIResourceList, error) {
 			return resources, nil
 		}
-		d := NewNamespacedResourcesDeleter(mockClient.Core().Namespaces(), dynamicClient, mockClient.Core(), fn, v1.FinalizerKubernetes, true)
+		d := NewNamespacedResourcesDeleter(mockClient.CoreV1().Namespaces(), dynamicClient, mockClient.CoreV1(), fn, v1.FinalizerKubernetes, true)
 		if err := d.Delete(testInput.testNamespace.Name); err != nil {
 			t.Errorf("scenario %s - Unexpected error when synching namespace %v", scenario, err)
 		}
@@ -213,13 +213,13 @@ func TestRetryOnConflictError(t *testing.T) {
 	retryOnce := func(namespace *v1.Namespace) (*v1.Namespace, error) {
 		numTries++
 		if numTries <= 1 {
-			return namespace, errors.NewConflict(api.Resource("namespaces"), namespace.Name, fmt.Errorf("ERROR!"))
+			return namespace, errors.NewConflict(api.Resource("namespaces"), namespace.Name, fmt.Errorf("ERROR"))
 		}
 		return namespace, nil
 	}
 	namespace := &v1.Namespace{}
 	d := namespacedResourcesDeleter{
-		nsClient: mockClient.Core().Namespaces(),
+		nsClient: mockClient.CoreV1().Namespaces(),
 	}
 	_, err := d.retryOnConflictError(namespace, retryOnce)
 	if err != nil {
@@ -255,7 +255,7 @@ func TestSyncNamespaceThatIsActive(t *testing.T) {
 	fn := func() ([]*metav1.APIResourceList, error) {
 		return testResources(), nil
 	}
-	d := NewNamespacedResourcesDeleter(mockClient.Core().Namespaces(), nil, mockClient.Core(),
+	d := NewNamespacedResourcesDeleter(mockClient.CoreV1().Namespaces(), nil, mockClient.CoreV1(),
 		fn, v1.FinalizerKubernetes, true)
 	err := d.Delete(testNamespace.Name)
 	if err != nil {

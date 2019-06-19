@@ -97,6 +97,10 @@ func VisitPodSecretNames(pod *api.Pod, visitor Visitor) bool {
 			if source.StorageOS.SecretRef != nil && !visitor(source.StorageOS.SecretRef.Name) {
 				return false
 			}
+		case source.CSI != nil:
+			if source.CSI.NodePublishSecretRef != nil && !visitor(source.CSI.NodePublishSecretRef.Name) {
+				return false
+			}
 		}
 	}
 	return true
@@ -318,10 +322,6 @@ func dropDisabledFields(
 		podSpec.PriorityClassName = ""
 	}
 
-	if !utilfeature.DefaultFeatureGate.Enabled(features.PodReadinessGates) && !podReadinessGatesInUse(oldPodSpec) {
-		podSpec.ReadinessGates = nil
-	}
-
 	if !utilfeature.DefaultFeatureGate.Enabled(features.Sysctls) && !sysctlsInUse(oldPodSpec) {
 		if podSpec.SecurityContext != nil {
 			podSpec.SecurityContext.Sysctls = nil
@@ -350,16 +350,46 @@ func dropDisabledFields(
 		}
 	}
 
+	if (!utilfeature.DefaultFeatureGate.Enabled(features.VolumeSubpath) || !utilfeature.DefaultFeatureGate.Enabled(features.VolumeSubpathEnvExpansion)) && !subpathExprInUse(oldPodSpec) {
+		// drop subpath env expansion from the pod if either of the subpath features is disabled and the old spec did not specify subpath env expansion
+		for i := range podSpec.Containers {
+			for j := range podSpec.Containers[i].VolumeMounts {
+				podSpec.Containers[i].VolumeMounts[j].SubPathExpr = ""
+			}
+		}
+		for i := range podSpec.InitContainers {
+			for j := range podSpec.InitContainers[i].VolumeMounts {
+				podSpec.InitContainers[i].VolumeMounts[j].SubPathExpr = ""
+			}
+		}
+	}
+
 	dropDisabledVolumeDevicesFields(podSpec, oldPodSpec)
 
 	dropDisabledRunAsGroupField(podSpec, oldPodSpec)
+
+	dropDisabledGMSAFields(podSpec, oldPodSpec)
 
 	if !utilfeature.DefaultFeatureGate.Enabled(features.RuntimeClass) && !runtimeClassInUse(oldPodSpec) {
 		// Set RuntimeClassName to nil only if feature is disabled and it is not used
 		podSpec.RuntimeClassName = nil
 	}
 
+	if !utilfeature.DefaultFeatureGate.Enabled(features.PodOverhead) && !overheadInUse(oldPodSpec) {
+		// Set Overhead to nil only if the feature is disabled and it is not used
+		podSpec.Overhead = nil
+	}
+
 	dropDisabledProcMountField(podSpec, oldPodSpec)
+
+	dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec)
+
+	if !utilfeature.DefaultFeatureGate.Enabled(features.NonPreemptingPriority) &&
+		!podPriorityInUse(oldPodSpec) {
+		// Set to nil pod's PreemptionPolicy fields if the feature is disabled and the old pod
+		// does not specify any values for these fields.
+		podSpec.PreemptionPolicy = nil
+	}
 }
 
 // dropDisabledRunAsGroupField removes disabled fields from PodSpec related
@@ -382,6 +412,39 @@ func dropDisabledRunAsGroupField(podSpec, oldPodSpec *api.PodSpec) {
 	}
 }
 
+// dropDisabledGMSAFields removes disabled fields related to Windows GMSA
+// from the given PodSpec.
+func dropDisabledGMSAFields(podSpec, oldPodSpec *api.PodSpec) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.WindowsGMSA) ||
+		gMSAFieldsInUse(oldPodSpec) {
+		return
+	}
+
+	if podSpec.SecurityContext != nil {
+		dropDisabledGMSAFieldsFromWindowsSecurityOptions(podSpec.SecurityContext.WindowsOptions)
+	}
+	dropDisabledGMSAFieldsFromContainers(podSpec.Containers)
+	dropDisabledGMSAFieldsFromContainers(podSpec.InitContainers)
+}
+
+// dropDisabledGMSAFieldsFromWindowsSecurityOptions removes disabled fields
+// related to Windows GMSA from the given WindowsSecurityContextOptions.
+func dropDisabledGMSAFieldsFromWindowsSecurityOptions(windowsOptions *api.WindowsSecurityContextOptions) {
+	if windowsOptions != nil {
+		windowsOptions.GMSACredentialSpecName = nil
+		windowsOptions.GMSACredentialSpec = nil
+	}
+}
+
+// dropDisabledGMSAFieldsFromContainers removes disabled fields
+func dropDisabledGMSAFieldsFromContainers(containers []api.Container) {
+	for i := range containers {
+		if containers[i].SecurityContext != nil {
+			dropDisabledGMSAFieldsFromWindowsSecurityOptions(containers[i].SecurityContext.WindowsOptions)
+		}
+	}
+}
+
 // dropDisabledProcMountField removes disabled fields from PodSpec related
 // to ProcMount only if it is not already used by the old spec
 func dropDisabledProcMountField(podSpec, oldPodSpec *api.PodSpec) {
@@ -389,12 +452,22 @@ func dropDisabledProcMountField(podSpec, oldPodSpec *api.PodSpec) {
 		defaultProcMount := api.DefaultProcMount
 		for i := range podSpec.Containers {
 			if podSpec.Containers[i].SecurityContext != nil {
-				podSpec.Containers[i].SecurityContext.ProcMount = &defaultProcMount
+				if podSpec.Containers[i].SecurityContext.ProcMount != nil {
+					// The ProcMount field was improperly forced to non-nil in 1.12.
+					// If the feature is disabled, and the existing object is not using any non-default values, and the ProcMount field is present in the incoming object, force to the default value.
+					// Note: we cannot force the field to nil when the feature is disabled because it causes a diff against previously persisted data.
+					podSpec.Containers[i].SecurityContext.ProcMount = &defaultProcMount
+				}
 			}
 		}
 		for i := range podSpec.InitContainers {
 			if podSpec.InitContainers[i].SecurityContext != nil {
-				podSpec.InitContainers[i].SecurityContext.ProcMount = &defaultProcMount
+				if podSpec.InitContainers[i].SecurityContext.ProcMount != nil {
+					// The ProcMount field was improperly forced to non-nil in 1.12.
+					// If the feature is disabled, and the existing object is not using any non-default values, and the ProcMount field is present in the incoming object, force to the default value.
+					// Note: we cannot force the field to nil when the feature is disabled because it causes a diff against previously persisted data.
+					podSpec.InitContainers[i].SecurityContext.ProcMount = &defaultProcMount
+				}
 			}
 		}
 	}
@@ -409,6 +482,16 @@ func dropDisabledVolumeDevicesFields(podSpec, oldPodSpec *api.PodSpec) {
 		}
 		for i := range podSpec.InitContainers {
 			podSpec.InitContainers[i].VolumeDevices = nil
+		}
+	}
+}
+
+// dropDisabledCSIVolumeSourceAlphaFields removes disabled alpha fields from []CSIVolumeSource.
+// This should be called from PrepareForCreate/PrepareForUpdate for all pod specs resources containing a CSIVolumeSource
+func dropDisabledCSIVolumeSourceAlphaFields(podSpec, oldPodSpec *api.PodSpec) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.CSIInlineVolume) && !csiInUse(oldPodSpec) {
+		for i := range podSpec.Volumes {
+			podSpec.Volumes[i].CSI = nil
 		}
 	}
 }
@@ -446,7 +529,19 @@ func runtimeClassInUse(podSpec *api.PodSpec) bool {
 	return false
 }
 
-// procMountInUse returns true if the pod spec is non-nil and has a SecurityContext's ProcMount field set
+// overheadInUse returns true if the pod spec is non-nil and has Overhead set
+func overheadInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	if podSpec.Overhead != nil {
+		return true
+	}
+	return false
+
+}
+
+// procMountInUse returns true if the pod spec is non-nil and has a SecurityContext's ProcMount field set to a non-default value
 func procMountInUse(podSpec *api.PodSpec) bool {
 	if podSpec == nil {
 		return false
@@ -520,17 +615,6 @@ func podPriorityInUse(podSpec *api.PodSpec) bool {
 	return false
 }
 
-// podReadinessGatesInUse returns true if the pod spec is non-nil and has ReadinessGates
-func podReadinessGatesInUse(podSpec *api.PodSpec) bool {
-	if podSpec == nil {
-		return false
-	}
-	if podSpec.ReadinessGates != nil {
-		return true
-	}
-	return false
-}
-
 func sysctlsInUse(podSpec *api.PodSpec) bool {
 	if podSpec == nil {
 		return false
@@ -590,6 +674,79 @@ func runAsGroupInUse(podSpec *api.PodSpec) bool {
 	}
 	for i := range podSpec.InitContainers {
 		if podSpec.InitContainers[i].SecurityContext != nil && podSpec.InitContainers[i].SecurityContext.RunAsGroup != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// gMSAFieldsInUse returns true if the pod spec is non-nil and has one of any
+// SecurityContext's GMSACredentialSpecName or GMSACredentialSpec fields set.
+func gMSAFieldsInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+
+	if podSpec.SecurityContext != nil && gMSAFieldsInUseInWindowsSecurityOptions(podSpec.SecurityContext.WindowsOptions) {
+		return true
+	}
+
+	return gMSAFieldsInUseInAnyContainer(podSpec.Containers) ||
+		gMSAFieldsInUseInAnyContainer(podSpec.InitContainers)
+}
+
+// gMSAFieldsInUseInWindowsSecurityOptions returns true if the given WindowsSecurityContextOptions is
+// non-nil and one of its GMSACredentialSpecName or GMSACredentialSpec fields is set.
+func gMSAFieldsInUseInWindowsSecurityOptions(windowsOptions *api.WindowsSecurityContextOptions) bool {
+	if windowsOptions == nil {
+		return false
+	}
+
+	return windowsOptions.GMSACredentialSpecName != nil ||
+		windowsOptions.GMSACredentialSpec != nil
+}
+
+// gMSAFieldsInUseInAnyContainer returns true if any of the given Containers has its
+// SecurityContext's GMSACredentialSpecName or GMSACredentialSpec fields set.
+func gMSAFieldsInUseInAnyContainer(containers []api.Container) bool {
+	for _, container := range containers {
+		if container.SecurityContext != nil && gMSAFieldsInUseInWindowsSecurityOptions(container.SecurityContext.WindowsOptions) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// subpathExprInUse returns true if the pod spec is non-nil and has a volume mount that makes use of the subPathExpr feature
+func subpathExprInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	for i := range podSpec.Containers {
+		for j := range podSpec.Containers[i].VolumeMounts {
+			if len(podSpec.Containers[i].VolumeMounts[j].SubPathExpr) > 0 {
+				return true
+			}
+		}
+	}
+	for i := range podSpec.InitContainers {
+		for j := range podSpec.InitContainers[i].VolumeMounts {
+			if len(podSpec.InitContainers[i].VolumeMounts[j].SubPathExpr) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// csiInUse returns true if any pod's spec include inline CSI volumes.
+func csiInUse(podSpec *api.PodSpec) bool {
+	if podSpec == nil {
+		return false
+	}
+	for i := range podSpec.Volumes {
+		if podSpec.Volumes[i].CSI != nil {
 			return true
 		}
 	}

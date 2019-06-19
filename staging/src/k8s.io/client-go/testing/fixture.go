@@ -18,9 +18,11 @@ package testing
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 
-	"github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -138,7 +140,12 @@ func ObjectReaction(tracker ObjectTracker) ReactionFunc {
 			if err != nil {
 				return true, nil, err
 			}
-			// Only supports strategic merge patch and JSONPatch as coded.
+
+			// reset the object in preparation to unmarshal, since unmarshal does not guarantee that fields
+			// in obj that are removed by patch are cleared
+			value := reflect.ValueOf(obj)
+			value.Elem().Set(reflect.New(value.Type().Elem()).Elem())
+
 			switch action.GetPatchType() {
 			case types.JSONPatchType:
 				patch, err := jsonpatch.DecodePatch(action.GetPatch())
@@ -149,7 +156,17 @@ func ObjectReaction(tracker ObjectTracker) ReactionFunc {
 				if err != nil {
 					return true, nil, err
 				}
+
 				if err = json.Unmarshal(modified, obj); err != nil {
+					return true, nil, err
+				}
+			case types.MergePatchType:
+				modified, err := jsonpatch.MergePatch(old, action.GetPatch())
+				if err != nil {
+					return true, nil, err
+				}
+
+				if err := json.Unmarshal(modified, obj); err != nil {
 					return true, nil, err
 				}
 			case types.StrategicMergePatchType:

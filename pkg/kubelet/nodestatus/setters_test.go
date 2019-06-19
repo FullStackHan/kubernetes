@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/uuid"
-	fakecloud "k8s.io/kubernetes/pkg/cloudprovider/providers/fake"
+	fakecloud "k8s.io/cloud-provider/fake"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubecontainertest "k8s.io/kubernetes/pkg/kubelet/container/testing"
@@ -249,7 +249,7 @@ func TestNodeAddress(t *testing.T) {
 			}
 			hostname := testKubeletHostname
 			externalCloudProvider := false
-			cloud := &fakecloud.FakeCloud{
+			cloud := &fakecloud.Cloud{
 				Addresses: testCase.nodeAddresses,
 				Err:       nil,
 			}
@@ -895,6 +895,7 @@ func TestReadyCondition(t *testing.T) {
 		node                     *v1.Node
 		runtimeErrors            error
 		networkErrors            error
+		storageErrors            error
 		appArmorValidateHostFunc func() error
 		cmStatus                 cm.Status
 		expectConditions         []v1.NodeCondition
@@ -928,6 +929,12 @@ func TestReadyCondition(t *testing.T) {
 				SoftRequirements: fmt.Errorf("foo"),
 			},
 			expectConditions: []v1.NodeCondition{*makeReadyCondition(true, "kubelet is posting ready status. WARNING: foo", now, now)},
+		},
+		{
+			desc:             "new, not ready: storage errors",
+			node:             withCapacity.DeepCopy(),
+			storageErrors:    errors.New("some storage error"),
+			expectConditions: []v1.NodeCondition{*makeReadyCondition(false, "some storage error", now, now)},
 		},
 		{
 			desc:             "new, not ready: runtime and network errors",
@@ -1003,6 +1010,9 @@ func TestReadyCondition(t *testing.T) {
 			networkErrorsFunc := func() error {
 				return tc.networkErrors
 			}
+			storageErrorsFunc := func() error {
+				return tc.storageErrors
+			}
 			cmStatusFunc := func() cm.Status {
 				return tc.cmStatus
 			}
@@ -1014,7 +1024,7 @@ func TestReadyCondition(t *testing.T) {
 				})
 			}
 			// construct setter
-			setter := ReadyCondition(nowFunc, runtimeErrorsFunc, networkErrorsFunc, tc.appArmorValidateHostFunc, cmStatusFunc, recordEventFunc)
+			setter := ReadyCondition(nowFunc, runtimeErrorsFunc, networkErrorsFunc, storageErrorsFunc, tc.appArmorValidateHostFunc, cmStatusFunc, recordEventFunc)
 			// call setter on node
 			if err := setter(tc.node); err != nil {
 				t.Fatalf("unexpected error: %v", err)

@@ -44,7 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	cloudprovider "k8s.io/cloud-provider"
-	"k8s.io/kubernetes/pkg/api/v1/service"
+	servicehelpers "k8s.io/cloud-provider/service/helpers"
 )
 
 // Note: when creating a new Loadbalancer (VM), it can take some time before it is ready for use,
@@ -84,8 +84,6 @@ var _ cloudprovider.LoadBalancer = (*LbaasV2)(nil)
 type LbaasV2 struct {
 	LoadBalancer
 }
-
-type empty struct{}
 
 func networkExtensions(client *gophercloud.ServiceClient) (map[string]bool, error) {
 	seen := make(map[string]bool)
@@ -722,12 +720,12 @@ func (lbaas *LbaasV2) EnsureLoadBalancer(ctx context.Context, clusterName string
 		}
 	}
 
-	sourceRanges, err := service.GetLoadBalancerSourceRanges(apiService)
+	sourceRanges, err := servicehelpers.GetLoadBalancerSourceRanges(apiService)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get source ranges for loadbalancer service %s/%s: %v", apiService.Namespace, apiService.Name, err)
 	}
 
-	if !service.IsAllowAll(sourceRanges) && !lbaas.opts.ManageSecurityGroups {
+	if !servicehelpers.IsAllowAll(sourceRanges) && !lbaas.opts.ManageSecurityGroups {
 		return nil, fmt.Errorf("source range restrictions are not supported for openstack load balancers without managing security groups")
 	}
 
@@ -895,7 +893,7 @@ func (lbaas *LbaasV2) EnsureLoadBalancer(ctx context.Context, clusterName string
 				return nil, fmt.Errorf("failed to loadbalance ACTIVE provisioning status %v: %v", provisioningStatus, err)
 			}
 			monitorID = monitor.ID
-		} else if lbaas.opts.CreateMonitor == false {
+		} else if !lbaas.opts.CreateMonitor {
 			klog.V(4).Infof("Do not create monitor for pool %s when create-monitor is false", pool.ID)
 		}
 
@@ -931,17 +929,15 @@ func (lbaas *LbaasV2) EnsureLoadBalancer(ctx context.Context, clusterName string
 			if err != nil && !isNotFound(err) {
 				return nil, fmt.Errorf("error getting members for pool %s: %v", pool.ID, err)
 			}
-			if members != nil {
-				for _, member := range members {
-					klog.V(4).Infof("Deleting obsolete member %s for pool %s address %s", member.ID, pool.ID, member.Address)
-					err := v2pools.DeleteMember(lbaas.lb, pool.ID, member.ID).ExtractErr()
-					if err != nil && !isNotFound(err) {
-						return nil, fmt.Errorf("error deleting obsolete member %s for pool %s address %s: %v", member.ID, pool.ID, member.Address, err)
-					}
-					provisioningStatus, err := waitLoadbalancerActiveProvisioningStatus(lbaas.lb, loadbalancer.ID)
-					if err != nil {
-						return nil, fmt.Errorf("failed to loadbalance ACTIVE provisioning status %v: %v", provisioningStatus, err)
-					}
+			for _, member := range members {
+				klog.V(4).Infof("Deleting obsolete member %s for pool %s address %s", member.ID, pool.ID, member.Address)
+				err := v2pools.DeleteMember(lbaas.lb, pool.ID, member.ID).ExtractErr()
+				if err != nil && !isNotFound(err) {
+					return nil, fmt.Errorf("error deleting obsolete member %s for pool %s address %s: %v", member.ID, pool.ID, member.Address, err)
+				}
+				provisioningStatus, err := waitLoadbalancerActiveProvisioningStatus(lbaas.lb, loadbalancer.ID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to loadbalance ACTIVE provisioning status %v: %v", provisioningStatus, err)
 				}
 			}
 			klog.V(4).Infof("Deleting obsolete pool %s for listener %s", pool.ID, listener.ID)
@@ -1030,7 +1026,7 @@ func (lbaas *LbaasV2) ensureSecurityGroup(clusterName string, apiService *v1.Ser
 	}
 
 	// get service source ranges
-	sourceRanges, err := service.GetLoadBalancerSourceRanges(apiService)
+	sourceRanges, err := servicehelpers.GetLoadBalancerSourceRanges(apiService)
 	if err != nil {
 		return fmt.Errorf("failed to get source ranges for loadbalancer service %s/%s: %v", apiService.Namespace, apiService.Name, err)
 	}

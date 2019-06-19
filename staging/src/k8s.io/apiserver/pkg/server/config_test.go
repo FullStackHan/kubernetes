@@ -56,7 +56,9 @@ func TestNewWithDelegate(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 
-	delegateServer.AddPostStartHook("delegate-post-start-hook", func(context PostStartHookContext) error {
+	delegatePostStartHookChan := make(chan struct{})
+	delegateServer.AddPostStartHookOrDie("delegate-post-start-hook", func(context PostStartHookContext) error {
+		defer close(delegatePostStartHookChan)
 		return nil
 	})
 
@@ -82,7 +84,9 @@ func TestNewWithDelegate(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	})
 
-	wrappingServer.AddPostStartHook("wrapping-post-start-hook", func(context PostStartHookContext) error {
+	wrappingPostStartHookChan := make(chan struct{})
+	wrappingServer.AddPostStartHookOrDie("wrapping-post-start-hook", func(context PostStartHookContext) error {
+		defer close(wrappingPostStartHookChan)
 		return nil
 	})
 
@@ -93,6 +97,10 @@ func TestNewWithDelegate(t *testing.T) {
 
 	server := httptest.NewServer(wrappingServer.Handler)
 	defer server.Close()
+
+	// Wait for the hooks to finish before checking the response
+	<-delegatePostStartHookChan
+	<-wrappingPostStartHookChan
 
 	checkPath(server.URL, http.StatusOK, `{
   "paths": [
@@ -107,7 +115,15 @@ func TestNewWithDelegate(t *testing.T) {
     "/healthz/poststarthook/generic-apiserver-start-informers",
     "/healthz/poststarthook/wrapping-post-start-hook",
     "/healthz/wrapping-health",
-    "/metrics"
+    "/metrics",
+    "/readyz",
+    "/readyz/delegate-health",
+    "/readyz/log",
+    "/readyz/ping",
+    "/readyz/poststarthook/delegate-post-start-hook",
+    "/readyz/poststarthook/generic-apiserver-start-informers",
+    "/readyz/poststarthook/wrapping-post-start-hook",
+    "/readyz/shutdown"
   ]
 }`, t)
 	checkPath(server.URL+"/healthz", http.StatusInternalServerError, `[+]ping ok

@@ -57,14 +57,6 @@ type CloudNodeController struct {
 	nodeStatusUpdateFrequency time.Duration
 }
 
-const (
-	// nodeStatusUpdateRetry controls the number of retries of writing NodeStatus update.
-	nodeStatusUpdateRetry = 5
-
-	// The amount of time the nodecontroller should sleep between retrying NodeStatus updates
-	retrySleepTime = 20 * time.Millisecond
-)
-
 // NewCloudNodeController creates a CloudNodeController object
 func NewCloudNodeController(
 	nodeInformer coreinformers.NodeInformer,
@@ -186,11 +178,11 @@ func (cnc *CloudNodeController) updateNodeAddress(node *v1.Node, instances cloud
 			return
 		}
 	}
-	newNode := node.DeepCopy()
-	newNode.Status.Addresses = nodeAddresses
-	if !nodeAddressesChangeDetected(node.Status.Addresses, newNode.Status.Addresses) {
+	if !nodeAddressesChangeDetected(node.Status.Addresses, nodeAddresses) {
 		return
 	}
+	newNode := node.DeepCopy()
+	newNode.Status.Addresses = nodeAddresses
 	_, _, err = nodeutil.PatchNodeStatus(cnc.kubeClient.CoreV1(), types.NodeName(node.Name), node, newNode)
 	if err != nil {
 		klog.Errorf("Error patching node with cloud ip addresses = [%v]", err)
@@ -256,6 +248,13 @@ func (cnc *CloudNodeController) initializeNode(node *v1.Node) {
 			return err
 		}
 
+		cloudTaint := getCloudTaint(curNode.Spec.Taints)
+		if cloudTaint == nil {
+			// Node object received from event had the cloud taint but was outdated,
+			// the node has actually already been initialized.
+			return nil
+		}
+
 		if curNode.Spec.ProviderID == "" {
 			providerID, err := cloudprovider.GetInstanceProviderID(context.TODO(), cnc.cloud, types.NodeName(curNode.Name))
 			if err == nil {
@@ -284,8 +283,8 @@ func (cnc *CloudNodeController) initializeNode(node *v1.Node) {
 		if instanceType, err := getInstanceTypeByProviderIDOrName(instances, curNode); err != nil {
 			return err
 		} else if instanceType != "" {
-			klog.V(2).Infof("Adding node label from cloud provider: %s=%s", kubeletapis.LabelInstanceType, instanceType)
-			curNode.ObjectMeta.Labels[kubeletapis.LabelInstanceType] = instanceType
+			klog.V(2).Infof("Adding node label from cloud provider: %s=%s", v1.LabelInstanceType, instanceType)
+			curNode.ObjectMeta.Labels[v1.LabelInstanceType] = instanceType
 		}
 
 		if zones, ok := cnc.cloud.Zones(); ok {
@@ -294,12 +293,12 @@ func (cnc *CloudNodeController) initializeNode(node *v1.Node) {
 				return fmt.Errorf("failed to get zone from cloud provider: %v", err)
 			}
 			if zone.FailureDomain != "" {
-				klog.V(2).Infof("Adding node label from cloud provider: %s=%s", kubeletapis.LabelZoneFailureDomain, zone.FailureDomain)
-				curNode.ObjectMeta.Labels[kubeletapis.LabelZoneFailureDomain] = zone.FailureDomain
+				klog.V(2).Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneFailureDomain, zone.FailureDomain)
+				curNode.ObjectMeta.Labels[v1.LabelZoneFailureDomain] = zone.FailureDomain
 			}
 			if zone.Region != "" {
-				klog.V(2).Infof("Adding node label from cloud provider: %s=%s", kubeletapis.LabelZoneRegion, zone.Region)
-				curNode.ObjectMeta.Labels[kubeletapis.LabelZoneRegion] = zone.Region
+				klog.V(2).Infof("Adding node label from cloud provider: %s=%s", v1.LabelZoneRegion, zone.Region)
+				curNode.ObjectMeta.Labels[v1.LabelZoneRegion] = zone.Region
 			}
 		}
 
@@ -312,14 +311,14 @@ func (cnc *CloudNodeController) initializeNode(node *v1.Node) {
 		// After adding, call UpdateNodeAddress to set the CloudProvider provided IPAddresses
 		// So that users do not see any significant delay in IP addresses being filled into the node
 		cnc.updateNodeAddress(curNode, instances)
+
+		klog.Infof("Successfully initialized node %s with cloud provider", node.Name)
 		return nil
 	})
 	if err != nil {
 		utilruntime.HandleError(err)
 		return
 	}
-
-	klog.Infof("Successfully initialized node %s with cloud provider", node.Name)
 }
 
 func getCloudTaint(taints []v1.Taint) *v1.Taint {
@@ -382,15 +381,13 @@ func nodeAddressesChangeDetected(addressSet1, addressSet2 []v1.NodeAddress) bool
 		return true
 	}
 	addressMap1 := map[v1.NodeAddressType]string{}
-	addressMap2 := map[v1.NodeAddressType]string{}
 
 	for i := range addressSet1 {
 		addressMap1[addressSet1[i].Type] = addressSet1[i].Address
-		addressMap2[addressSet2[i].Type] = addressSet2[i].Address
 	}
 
-	for k, v := range addressMap1 {
-		if addressMap2[k] != v {
+	for _, v := range addressSet2 {
+		if addressMap1[v.Type] != v.Address {
 			return true
 		}
 	}

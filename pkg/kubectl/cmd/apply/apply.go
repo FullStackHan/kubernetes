@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -39,8 +40,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/genericclioptions/printers"
-	"k8s.io/cli-runtime/pkg/genericclioptions/resource"
+	"k8s.io/cli-runtime/pkg/printers"
+	"k8s.io/cli-runtime/pkg/resource"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog"
@@ -55,6 +56,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubectl/validation"
 )
 
+// ApplyOptions defines flags and other configuration parameters for the `apply` command
 type ApplyOptions struct {
 	RecordFlags *genericclioptions.RecordFlags
 	Recorder    genericclioptions.Recorder
@@ -65,16 +67,19 @@ type ApplyOptions struct {
 	DeleteFlags   *delete.DeleteFlags
 	DeleteOptions *delete.DeleteOptions
 
-	Selector       string
-	DryRun         bool
-	ServerDryRun   bool
-	Prune          bool
-	PruneResources []pruneResource
-	cmdBaseName    string
-	All            bool
-	Overwrite      bool
-	OpenAPIPatch   bool
-	PruneWhitelist []string
+	ServerSideApply bool
+	ForceConflicts  bool
+	FieldManager    string
+	Selector        string
+	DryRun          bool
+	ServerDryRun    bool
+	Prune           bool
+	PruneResources  []pruneResource
+	cmdBaseName     string
+	All             bool
+	Overwrite       bool
+	OpenAPIPatch    bool
+	PruneWhitelist  []string
 
 	Validator       validation.Schema
 	Builder         *resource.Builder
@@ -112,6 +117,9 @@ var (
 		# Apply the configuration in pod.json to a pod.
 		kubectl apply -f ./pod.json
 
+		# Apply resources from a directory containing kustomization.yaml - e.g. dir/kustomization.yaml.
+		kubectl apply -k dir/
+
 		# Apply the JSON passed into stdin to a pod.
 		cat pod.json | kubectl apply -f -
 
@@ -125,6 +133,7 @@ var (
 	warningNoLastAppliedConfigAnnotation = "Warning: %[1]s apply should be used on resource created by either %[1]s create --save-config or %[1]s apply\n"
 )
 
+// NewApplyOptions creates new ApplyOptions for the `apply` command
 func NewApplyOptions(ioStreams genericclioptions.IOStreams) *ApplyOptions {
 	return &ApplyOptions{
 		RecordFlags: genericclioptions.NewRecordFlags(),
@@ -149,7 +158,7 @@ func NewCmdApply(baseName string, f cmdutil.Factory, ioStreams genericclioptions
 	o.cmdBaseName = baseName
 
 	cmd := &cobra.Command{
-		Use:                   "apply -f FILENAME",
+		Use:                   "apply (-f FILENAME | -k DIRECTORY)",
 		DisableFlagsInUseLine: true,
 		Short:                 i18n.T("Apply a configuration to a resource by filename or stdin"),
 		Long:                  applyLong,
@@ -167,7 +176,6 @@ func NewCmdApply(baseName string, f cmdutil.Factory, ioStreams genericclioptions
 	o.RecordFlags.AddFlags(cmd)
 	o.PrintFlags.AddFlags(cmd)
 
-	cmd.MarkFlagRequired("filename")
 	cmd.Flags().BoolVar(&o.Overwrite, "overwrite", o.Overwrite, "Automatically resolve conflicts between the modified and live configuration by using values from the modified configuration")
 	cmd.Flags().BoolVar(&o.Prune, "prune", o.Prune, "Automatically delete resource objects, including the uninitialized ones, that do not appear in the configs and are created by either apply or create --save-config. Should be used with either -l or --all.")
 	cmdutil.AddValidateFlags(cmd)
@@ -178,6 +186,7 @@ func NewCmdApply(baseName string, f cmdutil.Factory, ioStreams genericclioptions
 	cmd.Flags().BoolVar(&o.ServerDryRun, "server-dry-run", o.ServerDryRun, "If true, request will be sent to server with dry-run flag, which means the modifications won't be persisted. This is an alpha feature and flag.")
 	cmd.Flags().Bool("dry-run", false, "If true, only print the object that would be sent, without sending it. Warning: --dry-run cannot accurately output the result of merging the local manifest and the server-side data. Use --server-dry-run to get the merged result instead.")
 	cmdutil.AddIncludeUninitializedFlag(cmd)
+	cmdutil.AddServerSideApplyFlags(cmd)
 
 	// apply subcommands
 	cmd.AddCommand(NewCmdApplyViewLastApplied(f, ioStreams))
@@ -187,8 +196,20 @@ func NewCmdApply(baseName string, f cmdutil.Factory, ioStreams genericclioptions
 	return cmd
 }
 
+// Complete verifies if ApplyOptions are valid and without conflicts.
 func (o *ApplyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
+	o.ServerSideApply = cmdutil.GetServerSideApplyFlag(cmd)
+	o.ForceConflicts = cmdutil.GetForceConflictsFlag(cmd)
+	o.FieldManager = cmdutil.GetFieldManagerFlag(cmd)
 	o.DryRun = cmdutil.GetDryRunFlag(cmd)
+
+	if o.ForceConflicts && !o.ServerSideApply {
+		return fmt.Errorf("--experimental-force-conflicts only works with --experimental-server-side")
+	}
+
+	if o.DryRun && o.ServerSideApply {
+		return fmt.Errorf("--dry-run doesn't work with --experimental-server-side (did you mean --server-dry-run instead?)")
+	}
 
 	if o.DryRun && o.ServerDryRun {
 		return fmt.Errorf("--dry-run and --server-dry-run can't be used together")
@@ -223,6 +244,10 @@ func (o *ApplyOptions) Complete(f cmdutil.Factory, cmd *cobra.Command) error {
 		return err
 	}
 	o.DeleteOptions = o.DeleteFlags.ToOptions(dynamicClient, o.IOStreams)
+	err = o.DeleteOptions.FilenameOptions.RequireFilenameOrKustomize()
+	if err != nil {
+		return err
+	}
 
 	o.OpenAPISchema, _ = f.OpenAPISchema()
 	o.Validator, err = f.Validator(cmdutil.GetFlagBool(cmd, "validate"))
@@ -293,6 +318,17 @@ func parsePruneResources(mapper meta.RESTMapper, gvks []string) ([]pruneResource
 	return pruneResources, nil
 }
 
+func isIncompatibleServerError(err error) bool {
+	// 415: Unsupported media type means we're talking to a server which doesn't
+	// support server-side apply.
+	if _, ok := err.(*errors.StatusError); !ok {
+		// Non-StatusError means the error isn't because the server is incompatible.
+		return false
+	}
+	return err.(*errors.StatusError).Status().Code == http.StatusUnsupportedMediaType
+}
+
+// Run executes the `apply` command.
 func (o *ApplyOptions) Run() error {
 	var openapiSchema openapi.Resources
 	if o.OpenAPIPatch {
@@ -354,6 +390,57 @@ func (o *ApplyOptions) Run() error {
 
 		if err := o.Recorder.Record(info.Object); err != nil {
 			klog.V(4).Infof("error recording current command: %v", err)
+		}
+
+		if o.ServerSideApply {
+			// Send the full object to be applied on the server side.
+			data, err := runtime.Encode(unstructured.UnstructuredJSONScheme, info.Object)
+			if err != nil {
+				return cmdutil.AddSourceToErr("serverside-apply", info.Source, err)
+			}
+
+			options := metav1.PatchOptions{
+				Force:        &o.ForceConflicts,
+				FieldManager: o.FieldManager,
+			}
+			if o.ServerDryRun {
+				options.DryRun = []string{metav1.DryRunAll}
+			}
+
+			obj, err := resource.NewHelper(info.Client, info.Mapping).Patch(
+				info.Namespace,
+				info.Name,
+				types.ApplyPatchType,
+				data,
+				&options,
+			)
+			if err != nil {
+				if isIncompatibleServerError(err) {
+					err = fmt.Errorf("Server-side apply not available on the server: (%v)", err)
+				}
+
+				return err
+			}
+
+			info.Refresh(obj, true)
+			metadata, err := meta.Accessor(info.Object)
+			if err != nil {
+				return err
+			}
+
+			visitedUids.Insert(string(metadata.GetUID()))
+			count++
+			if len(output) > 0 && !shortOutput {
+				objs = append(objs, info.Object)
+				return nil
+			}
+
+			printer, err := o.ToPrinter("serverside-applied")
+			if err != nil {
+				return err
+			}
+
+			return printer.PrintObj(info.Object, o.Out)
 		}
 
 		// Get the modified configuration of the object. Embed the result
@@ -684,6 +771,7 @@ func (p *Patcher) delete(namespace, name string) error {
 	return runDelete(namespace, name, p.Mapping, p.DynamicClient, p.Cascade, p.GracePeriod, p.ServerDryRun)
 }
 
+// Patcher defines options to patch OpenAPI objects.
 type Patcher struct {
 	Mapping       *meta.RESTMapping
 	Helper        *resource.Helper
@@ -840,7 +928,7 @@ func (p *Patcher) patchSimple(obj runtime.Object, modified []byte, source, names
 		}
 	}
 
-	options := metav1.UpdateOptions{}
+	options := metav1.PatchOptions{}
 	if p.ServerDryRun {
 		options.DryRun = []string{metav1.DryRunAll}
 	}
@@ -849,6 +937,8 @@ func (p *Patcher) patchSimple(obj runtime.Object, modified []byte, source, names
 	return patch, patchedObj, err
 }
 
+// Patch tries to patch an OpenAPI resource. On success, returns the merge patch as well
+// the final patched object. On failure, returns an error.
 func (p *Patcher) Patch(current runtime.Object, modified []byte, source, namespace, name string, errOut io.Writer) ([]byte, runtime.Object, error) {
 	var getErr error
 	patchBytes, patchObject, err := p.patchSimple(current, modified, source, namespace, name, errOut)
